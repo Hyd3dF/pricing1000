@@ -1,0 +1,40 @@
+{
+  "name": "konu-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Konu platformu için bagimsiz, guvenli backend API (PostgreSQL + MinIO).",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "postbuild": "node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/db/migrate.ts",
+    "setup": "tsx src/setup/setup.ts"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "2.0.2",
+    "cors": "2.8.5",
+    "dotenv": "16.4.5",
+    "express": "^4.22.2",
+    "express-rate-limit": "7.4.0",
+    "helmet": "7.1.0",
+    "jsonwebtoken": "9.0.2",
+    "minio": "8.0.7",
+    "multer": "1.4.5-lts.1",
+    "pg": "8.12.0",
+    "sharp": "0.33.5",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.17",
+    "@types/express": "4.17.21",
+    "@types/jsonwebtoken": "9.0.6",
+    "@types/multer": "1.4.12",
+    "@types/node": "20.14.10",
+    "@types/pg": "8.11.6",
+    "tsx": "4.16.2",
+    "typescript": "5.5.3"
+  }
+}
