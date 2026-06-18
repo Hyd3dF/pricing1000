@@ -37,6 +37,8 @@ const schema = z.object({
 
   JWT_PRIVATE_KEY: z.string().optional(),
   JWT_PUBLIC_KEY: z.string().optional(),
+  JWT_PRIVATE_KEY_B64: z.string().optional(),
+  JWT_PUBLIC_KEY_B64: z.string().optional(),
   JWT_ISSUER: z.string().default("konu-backend"),
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("7d"),
@@ -61,13 +63,13 @@ const schema = z.object({
   HTTPS_CERT: z.string().optional(),
   HTTPS_KEY: z.string().optional(),
 
-  RATE_LIMIT_GENERAL_MAX: z.coerce.number().int().positive().default(300),
+  RATE_LIMIT_GENERAL_MAX: z.coerce.number().int().positive().default(600),
   RATE_LIMIT_GENERAL_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
-  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_REGISTER_MAX: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_REGISTER_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_REGISTER_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
-  RATE_LIMIT_UPLOAD_MAX: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_UPLOAD_MAX: z.coerce.number().int().positive().default(40),
   RATE_LIMIT_UPLOAD_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
 });
 
@@ -81,15 +83,38 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export const env = parsed.data;
+function decodePem(value: string | undefined, variable: string): string | undefined {
+  if (!value) return undefined;
+  const decoded = Buffer.from(value.trim(), "base64").toString("utf8").trim();
+  if (!decoded.includes("-----BEGIN ") || !decoded.includes(" KEY-----")) {
+    console.error(`${variable} gecerli bir Base64 PEM anahtari degildir.`);
+    process.exit(1);
+  }
+  return `${decoded}\n`;
+}
+
+const privateKeyFromBase64 = decodePem(
+  parsed.data.JWT_PRIVATE_KEY_B64,
+  "JWT_PRIVATE_KEY_B64",
+);
+const publicKeyFromBase64 = decodePem(
+  parsed.data.JWT_PUBLIC_KEY_B64,
+  "JWT_PUBLIC_KEY_B64",
+);
+
+export const env = {
+  ...parsed.data,
+  JWT_PRIVATE_KEY: privateKeyFromBase64 ?? parsed.data.JWT_PRIVATE_KEY,
+  JWT_PUBLIC_KEY: publicKeyFromBase64 ?? parsed.data.JWT_PUBLIC_KEY,
+};
 
 export const isProd = env.NODE_ENV === "production";
 export const isDev = env.NODE_ENV === "development";
 
 export function assertSecretsForServer(): void {
   const missing: string[] = [];
-  if (!env.JWT_PRIVATE_KEY) missing.push("JWT_PRIVATE_KEY");
-  if (!env.JWT_PUBLIC_KEY) missing.push("JWT_PUBLIC_KEY");
+  if (!env.JWT_PRIVATE_KEY) missing.push("JWT_PRIVATE_KEY veya JWT_PRIVATE_KEY_B64");
+  if (!env.JWT_PUBLIC_KEY) missing.push("JWT_PUBLIC_KEY veya JWT_PUBLIC_KEY_B64");
   if (!env.SERVICE_API_KEY) missing.push("SERVICE_API_KEY");
   if (missing.length > 0) {
     console.error(

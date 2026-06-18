@@ -1,5 +1,23 @@
 import jwt from "jsonwebtoken";
+import { createPrivateKey, createPublicKey } from "crypto";
 import { env } from "../config/env";
+
+function normalizePem(value: string): string {
+  const trimmed = value.trim();
+  const unquoted =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1)
+      : trimmed;
+  return `${unquoted.replace(/\\n/g, "\n").trim()}\n`;
+}
+
+const privateKey = env.JWT_PRIVATE_KEY
+  ? createPrivateKey(normalizePem(env.JWT_PRIVATE_KEY))
+  : undefined;
+const publicKey = env.JWT_PUBLIC_KEY
+  ? createPublicKey(normalizePem(env.JWT_PUBLIC_KEY))
+  : undefined;
 
 export interface AccessTokenPayload {
   sub: string;
@@ -22,7 +40,7 @@ export function signAccessToken(payload: {
   }
   return jwt.sign(
     { sub: payload.sub, username: payload.username, type: "access" },
-    env.JWT_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    privateKey!,
     {
       algorithm: "RS256",
       issuer: env.JWT_ISSUER,
@@ -35,7 +53,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   if (!env.JWT_PUBLIC_KEY) {
     throw new Error("JWT_PUBLIC_KEY yok");
   }
-  const decoded = jwt.verify(token, env.JWT_PUBLIC_KEY.replace(/\\n/g, "\n"), {
+  const decoded = jwt.verify(token, publicKey!, {
     algorithms: ["RS256"],
     issuer: env.JWT_ISSUER,
   }) as AccessTokenPayload;
