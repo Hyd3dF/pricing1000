@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { logger } from "../lib/logger";
 import fs from "fs";
 import path from "path";
+import { detectImageType } from "../lib/image";
 
 interface BucketPolicyDocument {
   Version: string;
@@ -24,6 +25,7 @@ export const minioClient = new Client({
 
 export let useLocalDisk = false;
 let checkPromise: Promise<boolean> | null = null;
+const ensuredBuckets = new Set<string>();
 
 export function initStorageCheck(): Promise<boolean> {
   if (checkPromise) return checkPromise;
@@ -54,10 +56,12 @@ export interface UploadedObject {
 }
 
 export async function ensureBucket(bucket: string): Promise<void> {
+  if (ensuredBuckets.has(bucket)) return;
   await initStorageCheck();
   if (useLocalDisk) {
     const dir = path.join(process.cwd(), "uploads", bucket);
     fs.mkdirSync(dir, { recursive: true });
+    ensuredBuckets.add(bucket);
     return;
   }
   const exists = await minioClient.bucketExists(bucket);
@@ -65,6 +69,7 @@ export async function ensureBucket(bucket: string): Promise<void> {
     await minioClient.makeBucket(bucket, "us-east-1");
     logger.info(`minio bucket olusturuldu: ${bucket}`);
   }
+  ensuredBuckets.add(bucket);
 }
 
 export async function setBucketPublicRead(bucket: string): Promise<void> {
@@ -91,7 +96,7 @@ export async function putObject(
   mimeType: string,
   bucket: string = env.MINIO_BUCKET,
 ): Promise<UploadedObject> {
-  await initStorageCheck();
+  await ensureBucket(bucket);
   if (useLocalDisk) {
     const filePath = path.join(process.cwd(), "uploads", bucket, key);
     const dir = path.dirname(filePath);
@@ -106,6 +111,48 @@ export async function putObject(
     "Cache-Control": "public, max-age=31536000, immutable",
   });
   return { key, size: buffer.length, mimeType };
+}
+
+export interface StoredObject {
+  buffer: Buffer;
+  mimeType: string;
+}
+
+export async function readObject(
+  key: string,
+  bucket: string = env.MINIO_BUCKET,
+): Promise<StoredObject> {
+  await ensureBucket(bucket);
+  if (useLocalDisk) {
+    const baseDir = path.resolve(process.cwd(), "uploads", bucket);
+    const filePath = path.resolve(baseDir, key);
+    if (!filePath.startsWith(`${baseDir}${path.sep}`)) {
+      const error = new Error("Gecersiz dosya yolu") as Error & { code: string };
+      error.code = "InvalidObjectKey";
+      throw error;
+    }
+    const buffer = fs.readFileSync(filePath);
+    const detected = detectImageType(buffer);
+    return { buffer, mimeType: detected?.mimeType ?? "application/octet-stream" };
+  }
+
+  const stat = await minioClient.statObject(bucket, key);
+  const stream = await minioClient.getObject(bucket, key);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const buffer = Buffer.concat(chunks);
+  const detected = detectImageType(buffer);
+  const metadata = stat.metaData as Record<string, string | undefined>;
+  return {
+    buffer,
+    mimeType:
+      metadata["content-type"] ??
+      metadata["Content-Type"] ??
+      detected?.mimeType ??
+      "application/octet-stream",
+  };
 }
 
 export async function removeObject(
@@ -134,16 +181,11 @@ export async function removeObject(
 }
 
 export function publicUrl(key: string, bucket: string = env.MINIO_BUCKET): string {
-  if (useLocalDisk) {
-    return `http://localhost:${env.PORT}/uploads/${bucket}/${key}`;
-  }
-
   if (env.MINIO_PUBLIC_BASE_URL) {
     const base = env.MINIO_PUBLIC_BASE_URL.replace(/\/$/, "");
     return `${base}/${bucket}/${encodeURI(key)}`;
   }
-  const proto = env.MINIO_USE_SSL ? "https" : "http";
-  return `${proto}://${env.MINIO_ENDPOINT}:${env.MINIO_PORT}/${bucket}/${encodeURI(key)}`;
+  return `/uploads/${bucket}/${encodeURI(key)}`;
 }
 
 export async function pingMinio(): Promise<boolean> {
@@ -154,4 +196,3 @@ export async function pingMinio(): Promise<boolean> {
     return false;
   }
 }
-

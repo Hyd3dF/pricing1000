@@ -6,6 +6,7 @@ import { corsMiddleware } from "./middleware/cors";
 import { generalLimiter } from "./middleware/rateLimit";
 import { apiKeyMiddleware } from "./middleware/apiKey";
 import { optionalAuth } from "./middleware/auth";
+import { asyncHandler } from "./middleware/asyncHandler";
 import { notFoundHandler, errorHandler } from "./middleware/error";
 import { healthRouter } from "./modules/health/health.routes";
 import { authRouter } from "./modules/auth/auth.routes";
@@ -16,9 +17,7 @@ import { commentsRouter } from "./modules/comments/comments.routes";
 import { roomsRouter } from "./modules/rooms/rooms.routes";
 import { socialRouter } from "./modules/social/social.routes";
 import { searchRouter } from "./modules/search/search.routes";
-import fs from "fs";
-import path from "path";
-import { detectImageType } from "./lib/image";
+import { readObject } from "./storage/minio";
 
 export function createApp(): Express {
   assertSecretsForServer();
@@ -41,31 +40,28 @@ export function createApp(): Express {
   app.use(express.json({ limit: "1mb", strict: true }));
   app.use(corsMiddleware);
 
-  // Serve uploads locally in development/fallback mode
-  app.get("/uploads/:bucket/*", (req, res) => {
+  // MinIO'yu disariya acmadan gorselleri backend uzerinden sun.
+  app.get("/uploads/:bucket/*", asyncHandler(async (req, res) => {
     const bucket = req.params.bucket;
-    const key = (req.params as any)[0];
-    const filePath = path.join(process.cwd(), "uploads", bucket, key);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("File not found");
+    const key = req.params[0];
+    if (bucket !== env.MINIO_BUCKET || !key) {
+      res.status(404).send("File not found");
+      return;
     }
     try {
-      const buffer = fs.readFileSync(filePath);
-      const detected = detectImageType(buffer);
-      if (detected) {
-        res.setHeader("Content-Type", detected.mimeType);
-      } else {
-        const ext = path.extname(filePath).toLowerCase();
-        if (ext === ".jpg" || ext === ".jpeg") res.setHeader("Content-Type", "image/jpeg");
-        else if (ext === ".png") res.setHeader("Content-Type", "image/png");
-        else if (ext === ".webp") res.setHeader("Content-Type", "image/webp");
-        else res.setHeader("Content-Type", "application/octet-stream");
-      }
-      res.send(buffer);
+      const object = await readObject(key, bucket);
+      res.setHeader("Content-Type", object.mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.send(object.buffer);
     } catch (err) {
-      res.status(500).send("Error reading file");
+      const code = (err as { code?: string }).code;
+      if (code === "NoSuchKey" || code === "NotFound" || code === "ENOENT") {
+        res.status(404).send("File not found");
+        return;
+      }
+      throw err;
     }
-  });
+  }));
 
   app.get("/", (_req, res) => {
     res.json({ name: "konu-backend", version: "0.2.0", docs: "/api/health" });

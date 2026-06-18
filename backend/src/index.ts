@@ -5,6 +5,7 @@ import { createApp } from "./app";
 import { env, isProd } from "./config/env";
 import { logger } from "./lib/logger";
 import { closeDb } from "./db/client";
+import { ensureBucket } from "./storage/minio";
 
 const app = createApp();
 
@@ -29,6 +30,12 @@ server.listen(env.PORT, () => {
   if (!isProd && env.WEB_APP_ORIGIN.length === 0) {
     logger.warn("WEB_APP_ORIGIN bos — CORS tum originlere acik. Uretimde kisitleyin.");
   }
+});
+
+void ensureBucket(env.MINIO_BUCKET).catch((err) => {
+  logger.error("MinIO bucket hazirlanamadi", {
+    message: err instanceof Error ? err.message : String(err),
+  });
 });
 
 async function shutdown(signal: string): Promise<void> {
